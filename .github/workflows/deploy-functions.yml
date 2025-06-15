@@ -1,4 +1,4 @@
-name: Deploy Azure Function (QA)
+name: Deploy to Azure Function App (QA)
 
 on:
   push:
@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout Code
+      - name: Checkout code
         uses: actions/checkout@v3
 
       - name: Setup .NET
