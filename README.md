@@ -11,10 +11,10 @@ The backend is built using .NET 8 Isolated Azure Functions, integrated with Open
 
 ## 🔁 CI/CD Environments
 
-| Environment | Branch | Azure App Name         | Deployment Status                                                                                                                         |
-| ----------- | ------ | ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| QA          | qa     | bulldog-qa-functions   | ![QA Status](https://github.com/Calathea-Z/project-bulldog-azure-functions/actions/workflows/deploy-functions-qa.yml/badge.svg)           |
-| Production  | main   | bulldog-prod-functions | ![Production Status](https://github.com/Calathea-Z/project-bulldog-azure-functions/actions/workflows/deploy-functions-prod.yml/badge.svg) |
+| Environment | Branch | Azure App Name         | Deployment Status                                                                                                                              |
+| ----------- | ------ | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| QA          | qa     | bulldog-qa-functions   | ![QA Status](https://github.com/project-bulldog/project-bulldog-azure-functions/actions/workflows/deploy-functions-qa.yml/badge.svg)           |
+| Production  | main   | bulldog-prod-functions | ![Production Status](https://github.com/project-bulldog/project-bulldog-azure-functions/actions/workflows/deploy-functions-prod.yml/badge.svg) |
 
 Pushes to `qa` auto-deploy to a staging Function App.  
 Pushes to `main` auto-deploy to your production Azure Function.
