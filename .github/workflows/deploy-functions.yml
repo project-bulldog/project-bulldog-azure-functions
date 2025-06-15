@@ -1,4 +1,4 @@
-name: Deploy to Azure Function App (QA)
+name: Deploy Azure Function (QA)
 
 on:
   push:
@@ -6,24 +6,26 @@ on:
       - qa
 
 jobs:
-  build-and-deploy:
+  deploy:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v3
 
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: "8.0.x"
 
-      - name: Publish Function App
-        run: dotnet publish -c Release -o ./publish
+      - name: Login to Azure
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      - name: Deploy to Azure Function App
+      - name: Publish function
+        run: dotnet publish --configuration Release --output ./publish
+
+      - name: Deploy to Azure
         uses: azure/webapps-deploy@v2
         with:
           app-name: bulldog-qa-functions
-          publish-profile: ${{ secrets.AZURE_FUNCTIONAPP_PUBLISH_PROFILE }}
           package: ./publish
