@@ -1,0 +1,29 @@
+name: Deploy to Azure Function App (QA)
+
+on:
+  push:
+    branches:
+      - qa
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Publish project
+        run: dotnet publish --configuration Release --output ./publish
+
+      - name: Deploy to Azure
+        uses: Azure/functions-action@v1
+        with:
+          app-name: bulldog-qa-functions
+          package: ./publish
+          publish-profile: ${{ secrets.AZURE_FUNCTIONAPP_PUBLISH_PROFILE }}
