@@ -8,6 +8,10 @@ using Microsoft.Azure.Functions.Worker.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using functions.Dtos;
+using UglyToad.PdfPig;
+using System.IO;
+using Novacode;
+
 
 namespace functions;
 
@@ -92,9 +96,25 @@ public class ExtractTextFromBlob
     private async Task<(Guid userId, string text)> ExtractTextAndValidateUserAsync(string blobName)
     {
         var blobClient = new BlobClient(_connectionString, UPLOADS_CONTAINER, blobName);
-        using var stream = await blobClient.OpenReadAsync();
-        using var reader = new StreamReader(stream);
-        var extractedText = await reader.ReadToEndAsync();
+        string extractedText;
+
+        using (var stream = await blobClient.OpenReadAsync())
+        {
+            if (blobName.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase))
+            {
+                extractedText = await ExtractTextFromPdfAsync(stream);
+            }
+            else if (blobName.EndsWith(".docx", StringComparison.OrdinalIgnoreCase))
+            {
+                extractedText = await ExtractTextFromDocxAsync(stream);
+            }
+            else // Handle .txt and .md files as plain text
+            {
+                using var reader = new StreamReader(stream);
+                extractedText = await reader.ReadToEndAsync();
+            }
+        }
+
         _logger.LogInformation("🧠 Extracted {length} characters from blob {name}", extractedText.Length, blobName);
 
         var segments = blobName.Split('/');
@@ -107,6 +127,32 @@ public class ExtractTextFromBlob
         return (userId, extractedText);
     }
 
+    private async Task<string> ExtractTextFromPdfAsync(Stream pdfStream)
+    {
+        using var document = PdfDocument.Open(pdfStream);
+        var textBuilder = new System.Text.StringBuilder();
+
+        foreach (var page in document.GetPages())
+        {
+            textBuilder.AppendLine(page.Text);
+        }
+
+        return textBuilder.ToString();
+    }
+
+    private async Task<string> ExtractTextFromDocxAsync(Stream docxStream)
+    {
+        using var mem = new MemoryStream();
+        await docxStream.CopyToAsync(mem);
+        mem.Position = 0;
+
+        return await Task.Run(() =>
+        {
+            using var doc = DocX.Load(mem);
+            return doc.Text;
+        });
+    }
+
     /// <summary>
     /// Processes the extracted text through the AI summarization service with retry logic.
     /// </summary>
@@ -117,36 +163,45 @@ public class ExtractTextFromBlob
     /// <returns>True if processing was successful, false otherwise</returns>
     private async Task<bool> ProcessTextWithRetryAsync(string blobName, string text, Guid userId, string token)
     {
-        var payload = new AiChunkedSummaryRequestDto(text, userId, true, null);
-
-        var request = new HttpRequestMessage(HttpMethod.Post, _backendEndpoint)
-        {
-            Content = JsonContent.Create(payload)
-        };
-
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
-
         for (int attempt = 1; attempt <= MAX_RETRIES; attempt++)
         {
-            var response = await _httpClient.SendAsync(request);
-            var body = await response.Content.ReadAsStringAsync();
+            try
+            {
+                var payload = new AiChunkedSummaryRequestDto(text, userId, true, null);
+                var request = new HttpRequestMessage(HttpMethod.Post, _backendEndpoint)
+                {
+                    Content = JsonContent.Create(payload)
+                };
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
 
-            if (response.IsSuccessStatusCode)
-            {
-                _logger.LogInformation("✅ Successfully posted extracted text for {name} on attempt {attempt}.", blobName, attempt);
-                return true;
-            }
+                var response = await _httpClient.SendAsync(request);
+                var body = await response.Content.ReadAsStringAsync();
 
-            if (attempt < MAX_RETRIES)
-            {
-                _logger.LogWarning("🔁 Retry {attempt}/{maxRetries} failed for {name}. Status: {status} | Body: {body}",
-                    attempt, MAX_RETRIES, blobName, response.StatusCode, body);
-                await Task.Delay(RETRY_DELAY_MS);
+                if (response.IsSuccessStatusCode)
+                {
+                    _logger.LogInformation("✅ Successfully posted extracted text for {name} on attempt {attempt}.", blobName, attempt);
+                    return true;
+                }
+
+                if (attempt < MAX_RETRIES)
+                {
+                    _logger.LogWarning("🔁 Retry {attempt}/{maxRetries} failed for {name}. Status: {status} | Body: {body}",
+                        attempt, MAX_RETRIES, blobName, response.StatusCode, body);
+                    await Task.Delay(RETRY_DELAY_MS);
+                }
+                else
+                {
+                    _logger.LogError("❌ Final attempt failed for {name}. Status: {status} | Body: {body}",
+                        blobName, response.StatusCode, body);
+                }
             }
-            else
+            catch (Exception ex)
             {
-                _logger.LogError("❌ Final attempt failed for {name}. Status: {status} | Body: {body}",
-                    blobName, response.StatusCode, body);
+                _logger.LogError(ex, "❌ Error on attempt {attempt}/{maxRetries}", attempt, MAX_RETRIES);
+                if (attempt < MAX_RETRIES)
+                {
+                    await Task.Delay(RETRY_DELAY_MS);
+                }
             }
         }
 
@@ -160,17 +215,38 @@ public class ExtractTextFromBlob
     /// <param name="success">Whether the blob processing was successful</param>
     private async Task HandleBlobCleanupAsync(string blobName, bool success)
     {
-        var sourceBlob = new BlobClient(_connectionString, UPLOADS_CONTAINER, blobName);
-
-        if (!success)
+        try
         {
-            var deadLetterBlob = new BlobClient(_connectionString, DEAD_LETTER_CONTAINER, blobName);
-            await deadLetterBlob.StartCopyFromUriAsync(sourceBlob.Uri);
-            _logger.LogWarning("☠️ Moved blob {name} to dead-letter container", blobName);
-        }
+            var sourceBlob = new BlobClient(_connectionString, UPLOADS_CONTAINER, blobName);
 
-        await sourceBlob.DeleteIfExistsAsync();
-        _logger.LogInformation("🗑️ Deleted blob {name} after processing", blobName);
+            if (!success)
+            {
+                try
+                {
+                    var deadLetterBlob = new BlobClient(_connectionString, DEAD_LETTER_CONTAINER, blobName);
+                    await deadLetterBlob.StartCopyFromUriAsync(sourceBlob.Uri);
+                    _logger.LogWarning("☠️ Moved blob {name} to dead-letter container", blobName);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "❌ Failed to move blob {name} to dead-letter container", blobName);
+                }
+            }
+
+            try
+            {
+                await sourceBlob.DeleteIfExistsAsync();
+                _logger.LogInformation("🗑️ Deleted blob {name} after processing", blobName);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "❌ Failed to delete blob {name}", blobName);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "❌ Error during blob cleanup for {name}", blobName);
+        }
     }
 
     /// <summary>
