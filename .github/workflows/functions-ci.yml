@@ -1,0 +1,38 @@
+name: Functions CI
+
+on:
+  push:
+    branches: [main, qa]
+  pull_request:
+    branches: [main, qa]
+
+jobs:
+  build:
+    name: Functions CI
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v3
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Restore packages
+        run: dotnet restore functions/functions.csproj
+
+      - name: Build solution
+        run: dotnet build functions/functions.csproj --configuration Release
+
+      # Debug tool versions and line-ending behavior
+      - name: Log .NET and format versions + Git EOL info
+        run: |
+          dotnet --version
+          dotnet format --version
+          git config --get core.autocrlf
+          git ls-files --eol
+
+      # Run code formatting check
+      - name: Verify code formatting
+        run: dotnet format functions/functions.csproj --verify-no-changes
