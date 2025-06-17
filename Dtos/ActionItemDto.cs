@@ -9,4 +9,7 @@ public class ActionItemDto
 
     [JsonPropertyName("dueAt")]
     public DateTime? DueAt { get; set; }
+
+    [JsonPropertyName("isDateOnly")]
+    public bool IsDateOnly { get; set; } = false;
 }
