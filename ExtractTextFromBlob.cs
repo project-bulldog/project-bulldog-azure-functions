@@ -128,12 +128,32 @@ namespace functions
         {
             try
             {
-                return await _aiService.ProcessTextAsync(text, bearer);
+                _logger.LogInformation("📡 Calling AI service for blob {BlobName}", blobName);
+                _logger.LogInformation("🔑 Bearer Token Length: {Length}", bearer?.Length ?? 0);
+                _logger.LogInformation("📄 Text Sample (first 300 chars): {Text}",
+                    text?.Length > 300 ? text.Substring(0, 300) + "..." : text);
+
+                var result = await _aiService.ProcessTextAsync(text, bearer);
+
+                if (result == null)
+                {
+                    _logger.LogWarning("⚠️ AI service returned null for blob {Blob}", blobName);
+                }
+
+                return result;
             }
             catch (Exception e)
             {
-                _logger.LogError(e, "AI controller call failed for blob {Blob}", blobName);
+                _logger.LogError(e, "🔥 AI controller call failed for blob {Blob}", blobName);
+                _logger.LogError("📛 Bearer Token: {Token}", bearer);
+                _logger.LogError("📄 Full Text Length: {Length}", text?.Length ?? 0);
+
+                // Clean up blob (optional)
                 await _blobService.SafeCleanup(blobName, deadLetter: true);
+
+                // TEMP DEBUGGING RESPONSE: return an error object with details
+                var res = req.CreateResponse(HttpStatusCode.InternalServerError);
+                await res.WriteStringAsync($"AI call failed: {e.Message}");
                 return null;
             }
         }
