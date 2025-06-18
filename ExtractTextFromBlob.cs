@@ -148,12 +148,9 @@ namespace functions
                 _logger.LogError("📛 Bearer Token: {Token}", bearer);
                 _logger.LogError("📄 Full Text Length: {Length}", text?.Length ?? 0);
 
-                // Clean up blob (optional)
                 await _blobService.SafeCleanup(blobName, deadLetter: true);
 
-                // TEMP DEBUGGING RESPONSE: return an error object with details
-                var res = req.CreateResponse(HttpStatusCode.InternalServerError);
-                await res.WriteStringAsync($"AI call failed: {e.Message}");
+                // Do NOT write or return a response here
                 return null;
             }
         }
