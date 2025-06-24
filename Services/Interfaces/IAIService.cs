@@ -5,6 +5,6 @@ namespace functions.Services.Interfaces
 {
     public interface IAIService
     {
-        Task<AiSummaryWithTasksResponseDto> ProcessTextAsync(string text, string bearerToken);
+        Task<AiSummaryWithTasksResponseDto> ProcessTextAsync(string text, string bearerToken, string? userTimeZoneId = null);
     }
 }
