@@ -13,14 +13,11 @@ using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
-using UglyToad.PdfPig;
-using Novacode;
 using functions.Dtos;
+using System.Text;
 using System.Threading;
-using System.Text.Json.Serialization;
-using functions.Services.Interfaces;
-using functions.Converters;
 using Microsoft.Extensions.Options;
+using functions.Services.Interfaces;
 
 namespace functions
 {
@@ -34,12 +31,12 @@ namespace functions
         private readonly IAIService _aiService;
         private readonly JsonSerializerOptions _jsonOptions;
 
-
         public ExtractTextFromBlob(
             ILogger<ExtractTextFromBlob> logger,
             IBlobService blobService,
             IAIService aiService,
-            IOptions<JsonSerializerOptions> jsonOptions)
+            IOptions<JsonSerializerOptions> jsonOptions,
+            IConfiguration configuration)
         {
             _logger = logger;
             _blobService = blobService;
@@ -60,50 +57,45 @@ namespace functions
             if (string.IsNullOrWhiteSpace(bearer))
                 return await Error(req, HttpStatusCode.Unauthorized, "Missing bearer token");
 
-            var text = await TryReadBlobAsync(req, dto.BlobName);
+            var text = await TryReadBlobAsync(dto.BlobName);
             if (text == null)
                 return await Error(req, HttpStatusCode.NotFound, $"Blob not found: {dto.BlobName}");
 
-            var aiResult = await TryCallAiAsync(req, dto.BlobName, text, bearer);
+            var userTimeZoneId = ExtractUserTimeZone(req);
+
+            var aiResult = await TryCallAiAsync(dto.BlobName, text, bearer, userTimeZoneId);
             if (aiResult == null)
                 return await Error(req, HttpStatusCode.InternalServerError, "AI processing failed");
 
             await _blobService.SafeCleanup(dto.BlobName, deadLetter: false);
 
             var response = req.CreateResponse(HttpStatusCode.OK);
-            var serialized = JsonSerializer.Serialize(aiResult, _jsonOptions);
-            _logger.LogInformation("✅ AI result sent: {Result}", serialized);
+            response.Headers.Add("Content-Type", "application/json");
+            var jsonString = JsonSerializer.Serialize(aiResult, _jsonOptions);
+            await response.WriteStringAsync(jsonString);
 
-            foreach (var item in aiResult.ActionItems)
-            {
-                _logger.LogInformation("📝 ActionItem: '{Text}' | DueAt: '{DueAt}' | Type: '{Type}'",
-                    item.Text, item.DueAt, item.DueAt?.GetType().Name ?? "null");
-            }
+            _logger.LogInformation("✅ AI result sent with {Count} action items. Used TimeZone: {TimeZone}", aiResult.ActionItems.Count, aiResult.UsedTimeZoneId);
 
             stopwatch.Stop();
             _logger.LogInformation("⏱ Function executed in {Ms} ms", stopwatch.ElapsedMilliseconds);
 
-            await response.WriteAsJsonAsync(aiResult);
             return response;
         }
 
-
-        #region Helper methods
         private async Task<BlobTriggerRequestDto?> ParseRequestAsync(HttpRequestData req)
         {
             try
             {
-                var dto = await JsonSerializer.DeserializeAsync<BlobTriggerRequestDto>(req.Body, _jsonOptions);
-                if (string.IsNullOrWhiteSpace(dto?.BlobName))
-                    return null;
-                return dto;
+                var dto = await JsonSerializer.DeserializeAsync<BlobTriggerRequestDto>(req.Body, _jsonOptions, CancellationToken.None);
+                return string.IsNullOrWhiteSpace(dto?.BlobName) ? null : dto;
             }
             catch (JsonException ex)
             {
-                await Error(req, HttpStatusCode.BadRequest, "Invalid JSON payload", ex);
+                _logger.LogError(ex, "❌ Failed to parse request body");
                 return null;
             }
         }
+
 
         private string ExtractBearerToken(HttpRequestData req)
         {
@@ -111,7 +103,12 @@ namespace functions
             return headers?.FirstOrDefault()?.Replace("Bearer ", "") ?? string.Empty;
         }
 
-        private async Task<string?> TryReadBlobAsync(HttpRequestData req, string blobName)
+        private string? ExtractUserTimeZone(HttpRequestData req)
+        {
+            return req.Headers.TryGetValues("X-User-TimeZone", out var values) ? values.FirstOrDefault() : null;
+        }
+
+        private async Task<string?> TryReadBlobAsync(string blobName)
         {
             try
             {
@@ -124,20 +121,21 @@ namespace functions
             }
         }
 
-        private async Task<AiSummaryWithTasksResponseDto?> TryCallAiAsync(HttpRequestData req, string blobName, string text, string bearer)
+        private async Task<AiSummaryWithTasksResponseDto?> TryCallAiAsync(string blobName, string text, string bearer, string? userTimeZoneId)
         {
             try
             {
                 _logger.LogInformation("📡 Calling AI service for blob {BlobName}", blobName);
-                _logger.LogInformation("🔑 Bearer Token Length: {Length}", bearer?.Length ?? 0);
-                _logger.LogInformation("📄 Text Sample (first 300 chars): {Text}",
-                    text?.Length > 300 ? text.Substring(0, 300) + "..." : text);
 
-                var result = await _aiService.ProcessTextAsync(text, bearer);
+                var result = await _aiService.ProcessTextAsync(text, bearer, userTimeZoneId);
 
-                if (result == null)
+                if (result.ActionItems != null)
                 {
-                    _logger.LogWarning("⚠️ AI service returned null for blob {Blob}", blobName);
+                    foreach (var item in result.ActionItems)
+                    {
+                        _logger.LogInformation("📝 AI Result - Task: '{Text}' | DueAt: '{DueAt}' | Type: '{Type}'",
+                            item.Text, item.DueAt, item.DueAt?.GetType().Name ?? "null");
+                    }
                 }
 
                 return result;
@@ -145,15 +143,11 @@ namespace functions
             catch (Exception e)
             {
                 _logger.LogError(e, "🔥 AI controller call failed for blob {Blob}", blobName);
-                _logger.LogError("📛 Bearer Token: {Token}", bearer);
-                _logger.LogError("📄 Full Text Length: {Length}", text?.Length ?? 0);
-
                 await _blobService.SafeCleanup(blobName, deadLetter: true);
-
-                // Do NOT write or return a response here
                 return null;
             }
         }
+
         private async Task<HttpResponseData> Error(HttpRequestData req, HttpStatusCode code, string msg, Exception? ex = null)
         {
             if (ex != null)
@@ -165,7 +159,5 @@ namespace functions
             await res.WriteStringAsync(msg);
             return res;
         }
-
-        #endregion
     }
 }
