@@ -10,10 +10,15 @@ public record AiSummaryWithTasksResponseDto
     [JsonPropertyName("actionItems")]
     public List<ActionItemDto> ActionItems { get; init; }
 
+    [JsonPropertyName("usedTimeZoneId")]
+    public string? UsedTimeZoneId { get; init; }
+
     [JsonConstructor]
-    public AiSummaryWithTasksResponseDto(string summary, List<ActionItemDto>? actionItems)
+    public AiSummaryWithTasksResponseDto(string summary, List<ActionItemDto>? actionItems, string? usedTimeZoneId = null)
     {
         Summary = summary;
         ActionItems = actionItems ?? new List<ActionItemDto>();
+        UsedTimeZoneId = usedTimeZoneId;
     }
 }
+

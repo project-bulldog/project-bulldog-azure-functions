@@ -32,22 +32,24 @@ namespace functions.Services.Implementations
             _jsonOptions = jsonOptions.Value;
         }
 
-        public async Task<AiSummaryWithTasksResponseDto> ProcessTextAsync(string text, string bearerToken)
+        public async Task<AiSummaryWithTasksResponseDto> ProcessTextAsync(string text, string bearerToken, string? userTimeZoneId = null)
         {
-            // Create HTTP request to AI endpoint with input text
-            var aiReq = new HttpRequestMessage(HttpMethod.Post, _aiEndpoint)
+            var payload = new
             {
-                Content = JsonContent.Create(new { Input = text })
+                Input = text,
+                TimeZoneId = userTimeZoneId
             };
 
-            // Add bearer token to request headers if provided
+            var aiReq = new HttpRequestMessage(HttpMethod.Post, _aiEndpoint)
+            {
+                Content = JsonContent.Create(payload)
+            };
+
             if (!string.IsNullOrWhiteSpace(bearerToken))
                 aiReq.Headers.Authorization = new AuthenticationHeaderValue("Bearer", bearerToken);
 
-            // Send request to AI service
             var aiRes = await _httpClient.SendAsync(aiReq);
 
-            // Handle error response from AI service
             if (!aiRes.IsSuccessStatusCode)
             {
                 var error = await aiRes.Content.ReadAsStringAsync();
@@ -56,19 +58,15 @@ namespace functions.Services.Implementations
                 throw new HttpRequestException($"AI service returned {aiRes.StatusCode}: {error}");
             }
 
-            // Read and log raw response content
             var content = await aiRes.Content.ReadAsStringAsync();
             _logger.LogInformation("Raw AI response: {Response}", content);
 
-            // Deserialize response into DTO, throw if empty or invalid
             var result = JsonSerializer.Deserialize<AiSummaryWithTasksResponseDto>(content, _jsonOptions)
                 ?? throw new InvalidOperationException("Empty or malformed AI response");
 
-            // Log warning if no action items were returned
             if (result.ActionItems == null || result.ActionItems.Count == 0)
                 _logger.LogWarning("⚠️ AI response contained no action items.");
 
-            // Log details of each action item for debugging
             foreach (var item in result.ActionItems)
             {
                 _logger.LogInformation("📝 ActionItem: '{Text}' | DueAt: '{DueAt}' | Type: '{Type}'",
