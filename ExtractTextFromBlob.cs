@@ -70,7 +70,9 @@ namespace functions
             await _blobService.SafeCleanup(dto.BlobName, deadLetter: false);
 
             var response = req.CreateResponse(HttpStatusCode.OK);
-            await response.WriteAsJsonAsync(aiResult, _jsonOptions);
+            response.Headers.Add("Content-Type", "application/json");
+            var jsonString = JsonSerializer.Serialize(aiResult, _jsonOptions);
+            await response.WriteStringAsync(jsonString);
 
             _logger.LogInformation("✅ AI result sent with {Count} action items. Used TimeZone: {TimeZone}", aiResult.ActionItems.Count, aiResult.UsedTimeZoneId);
 
@@ -84,7 +86,7 @@ namespace functions
         {
             try
             {
-                var dto = await JsonSerializer.DeserializeAsync<BlobTriggerRequestDto>(req.Body, _jsonOptions);
+                var dto = await JsonSerializer.DeserializeAsync<BlobTriggerRequestDto>(req.Body, _jsonOptions, CancellationToken.None);
                 return string.IsNullOrWhiteSpace(dto?.BlobName) ? null : dto;
             }
             catch (JsonException ex)
@@ -93,6 +95,7 @@ namespace functions
                 return null;
             }
         }
+
 
         private string ExtractBearerToken(HttpRequestData req)
         {
@@ -126,10 +129,13 @@ namespace functions
 
                 var result = await _aiService.ProcessTextAsync(text, bearer, userTimeZoneId);
 
-                foreach (var item in result.ActionItems)
+                if (result.ActionItems != null)
                 {
-                    _logger.LogInformation("📝 AI Result - Task: '{Text}' | DueAt: '{DueAt}' | Type: '{Type}'",
-                        item.Text, item.DueAt, item.DueAt?.GetType().Name ?? "null");
+                    foreach (var item in result.ActionItems)
+                    {
+                        _logger.LogInformation("📝 AI Result - Task: '{Text}' | DueAt: '{DueAt}' | Type: '{Type}'",
+                            item.Text, item.DueAt, item.DueAt?.GetType().Name ?? "null");
+                    }
                 }
 
                 return result;

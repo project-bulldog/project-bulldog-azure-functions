@@ -66,11 +66,13 @@ namespace functions.Services.Implementations
 
             if (result.ActionItems == null || result.ActionItems.Count == 0)
                 _logger.LogWarning("⚠️ AI response contained no action items.");
-
-            foreach (var item in result.ActionItems)
+            else
             {
-                _logger.LogInformation("📝 ActionItem: '{Text}' | DueAt: '{DueAt}' | Type: '{Type}'",
-                    item.Text, item.DueAt, item.DueAt?.GetType().Name ?? "null");
+                foreach (var item in result.ActionItems)
+                {
+                    _logger.LogInformation("📝 ActionItem: '{Text}' | DueAt: '{DueAt}' | Type: '{Type}'",
+                        item.Text, item.DueAt, item.DueAt?.GetType().Name ?? "null");
+                }
             }
 
             return result;
