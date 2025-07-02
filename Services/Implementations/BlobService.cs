@@ -80,7 +80,7 @@ namespace functions.Services.Implementations
             }
         }
 
-        #region Private Helpers
+        #region Private Methods
 
         private static string ExtractTextFromPdf(Stream stream)
         {
