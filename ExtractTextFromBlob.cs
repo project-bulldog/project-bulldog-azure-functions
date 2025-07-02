@@ -44,6 +44,13 @@ namespace functions
             _jsonOptions = jsonOptions.Value;
         }
 
+        /// <summary>
+        /// Azure Function that extracts text from a blob storage file and processes it through AI to generate action items and summaries.
+        /// The function validates the request, extracts text from the specified blob, calls an AI service to analyze the content,
+        /// and returns structured data including action items with reminders. It also handles cleanup of processed blobs.
+        /// </summary>
+        /// <param name="req">HTTP request containing blob name and authentication details</param>
+        /// <returns>HTTP response with AI-processed results including action items and summary</returns>
         [Function("ExtractTextFromBlob")]
         public async Task<HttpResponseData> Run([HttpTrigger(AuthorizationLevel.Function, "post")] HttpRequestData req)
         {
@@ -82,6 +89,12 @@ namespace functions
             return response;
         }
 
+        #region Private Methods
+        /// <summary>
+        /// Parses the HTTP request body to extract blob trigger request data.
+        /// Deserializes the JSON payload into a BlobTriggerRequestDto and validates that the blob name is not empty.
+        /// </summary>
+        /// <returns>The parsed DTO if valid, null otherwise</returns>
         private async Task<BlobTriggerRequestDto?> ParseRequestAsync(HttpRequestData req)
         {
             try
@@ -96,18 +109,30 @@ namespace functions
             }
         }
 
-
+        /// <summary>
+        /// Extracts the bearer token from the Authorization header of the HTTP request.
+        /// Removes the "Bearer " prefix if present and returns the token value.
+        /// </summary>
+        /// <returns>The bearer token value, or empty string if not found</returns>
         private string ExtractBearerToken(HttpRequestData req)
         {
             req.Headers.TryGetValues("Authorization", out var headers);
             return headers?.FirstOrDefault()?.Replace("Bearer ", "") ?? string.Empty;
         }
 
+        /// <summary>
+        /// Extracts the user's timezone identifier from the X-User-TimeZone header.
+        /// </summary>
+        /// <returns>The timezone identifier if present, null otherwise</returns>
         private string? ExtractUserTimeZone(HttpRequestData req)
         {
             return req.Headers.TryGetValues("X-User-TimeZone", out var values) ? values.FirstOrDefault() : null;
         }
 
+        /// <summary>
+        /// Attempts to read and extract text content from a blob in Azure Storage.
+        /// Handles 404 errors gracefully by returning null when the blob is not found.
+        /// <returns>The extracted text content, or null if the blob doesn't exist</returns>
         private async Task<string?> TryReadBlobAsync(string blobName)
         {
             try
@@ -121,6 +146,11 @@ namespace functions
             }
         }
 
+        /// <summary>
+        /// Calls the AI service to process text content and generate action items with summaries.
+        /// Logs detailed information about each generated action item and handles cleanup on failure.
+        /// </summary>
+        /// <returns>The AI processing result with action items and summary, or null if processing fails</returns>
         private async Task<AiSummaryWithTasksResponseDto?> TryCallAiAsync(string blobName, string text, string bearer, string? userTimeZoneId)
         {
             try
@@ -159,5 +189,6 @@ namespace functions
             await res.WriteStringAsync(msg);
             return res;
         }
+        #endregion
     }
 }
